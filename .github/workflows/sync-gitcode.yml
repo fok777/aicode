@@ -1,0 +1,42 @@
+name: Sync Code to GitCode
+
+# 把 GitHub 主仓库的全部分支与 tag 定时镜像到 GitCode，与 Release 附件同步相互独立：
+#   - 每 6 小时自动执行（schedule），也可在 Actions 页面手动触发（workflow_dispatch）
+#   - push --prune 保证 GitCode 侧 refs 与 GitHub 完全一致（GitCode 上不要直接改代码）
+# 前置配置：GitHub Secret GITCODE_TOKEN = GitCode 个人访问令牌（需仓库读写 + API 权限）
+#           用户名固定用 oauth2，令牌即密码（已实测 GitCode 支持该认证方式）。
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 需要全部分支和 tag，浅克隆（默认 depth=1）无法覆盖
+          fetch-depth: 0
+
+      - name: Push branches & tags to GitCode
+        env:
+          GITCODE_TOKEN: ${{ secrets.GITCODE_TOKEN }}
+          GITCODE_OWNER: ${{ vars.GITCODE_OWNER }}
+          GITCODE_REPO: ${{ vars.GITCODE_REPO }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GITCODE_TOKEN" ]]; then
+            echo "::warning::未配置 GITCODE_TOKEN，跳过 GitCode 代码同步。请到 Settings→Secrets and variables→Actions 添加。"
+            exit 0
+          fi
+          owner="${GITCODE_OWNER:-${GITHUB_REPOSITORY%/*}}"
+          repo="${GITCODE_REPO:-${GITHUB_REPOSITORY#*/}}"
+          echo "目标 GitCode 仓库: ${owner}/${repo}"
+          git remote add gitcode "https://oauth2:${GITCODE_TOKEN}@gitcode.com/${owner}/${repo}.git"
+          git push --prune gitcode \
+            "+refs/heads/*:refs/heads/*" \
+            "+refs/tags/*:refs/tags/*"
+          echo "✓ 代码与 tag 已同步到 https://gitcode.com/${owner}/${repo}"
